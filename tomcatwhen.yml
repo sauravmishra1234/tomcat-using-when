@@ -1,0 +1,100 @@
+---
+- name: install tomcat server
+  hosts: all
+  become: true
+  vars:
+    server: '/opt/apache-tomcat-7.0.61/conf/server.xml'
+    dest1: '/usr/share/tomcat/conf'
+    user: '/opt/apache-tomcat-7.0.61/conf/tomcat-users.xml'
+    dest2: '/opt/apache-tomcat-7.0.61'
+    dest3: '/usr/share/tomcat'
+    dest4: '/opt/apache-tomcat-7.0.61/conf'
+  tasks:
+
+  - name: Add Java Repo
+    apt_repository:  repo='ppa:openjdk-r/ppa'
+  - name: Install Java
+    apt: pkg=openjdk-8-jdk
+    become: yes
+  - name: add group tomcat
+    group: name=tomcat
+  - name: add user tomcat
+    user: name=tomcat group=tomcat home=/usr/share/tomcat createhome=no
+    become: true
+  - name: download tomcat
+    get_url:
+      url=http://archive.apache.org/dist/tomcat/tomcat-7/v7.0.61/bin/apache-tomcat-7.0.61.tar.gz dest=/opt/apache-tomcat-7.0.61.tar.gz
+  # below command will untar or extract tomcat file
+  - name: extract tomcat
+    command: chdir=/usr/share /bin/tar xvf /opt/apache-tomcat-7.0.61.tar.gz -C /opt/ creates=/opt/apache-tomcat-7.0.61
+  - name: symlink install directory
+      file:
+      src: "{{ dest2 }}"
+      path: "{{ dest3 }}"
+      state: link
+  - name: change ownership for tomcat installation
+    file:
+      path: "{{ dest2 }}"
+      owner: "{{ item.owner }}"
+      group: "{{ item.group }}"
+      state: "{{ item.state }}"
+      recurse: "{{ item.recurse }}"
+
+    with_items:
+       - { owner: tomcat, group: tomcat, state: directory, recurse: yes }
+
+  - name: configure tomcat server
+    copy:
+      src: "{{ server }}"
+      dest: "{{ dest1 }}"
+      remote_src: yes
+    notify: restart tomcat
+    become: yes
+
+  - name: configure tomcat user
+    copy:
+      src: "{{ user }}"
+      dest: "{{ dest1 }}"
+      remote_src: yes
+    notify: restart tomcat
+    become: yes
+
+  - name: check file is available
+    stat:
+      path: '/etc/init.d/'
+    register: check_tomcat_existence
+
+  - name: Download  tomcat initscript
+    get_url:
+      url: 'https://raw.githubusercontent.com/sauravmishra1234/tomcat/main/tomcat-initscript.sh'
+      dest: '/etc/init.d/'
+      mode: 0755
+    when: check_tomcat_existence.stat.exists == false
+
+  - name: copy script file in tomcat
+    copy:
+      src: '/etc/init.d/tomcat-initscript.sh'
+      dest: '/etc/init.d/tomcat'
+      mode: 0755
+      remote_src: yes
+
+  - name: remove user file
+    file:
+      path: "{{ user }}"
+      state: absent
+   - name: check tomcat users files is available
+    stat:
+      path: '/opt/apache-tomcat-7.0.61/conf'
+    register: check_tomcat_users_existence
+
+  - name: download tomcat-users.xml file from github
+    get_url:
+      url: 'https://raw.githubusercontent.com/sauravmishra1234/tomcatxml/main/tomcat-users.xml'
+      dest: '/opt/apache-tomcat-7.0.61/conf'
+    when: check_tomcat_users_existence.stat.exists == false
+
+  - name: system d daemon reload
+    shell: systemctl daemon-reload
+
+  - name: start tomcat
+    service: name=tomcat state=restarted
